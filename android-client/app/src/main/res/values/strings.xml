@@ -1,0 +1,15 @@
+<resources>
+    <string name="app_name">Restore Credentials Demo</string>
+
+    <string name="signin_title">Sign in</string>
+    <string name="signin_subtitle">After you sign in, this device holds a restore credential. Reinstall on a new device and you\'ll be signed in automatically, with zero taps.</string>
+    <string name="signin_username_label">Username</string>
+    <string name="signin_password_label">Password</string>
+    <string name="signin_submit">Sign in</string>
+    <string name="signin_generic_error">Something went wrong - try again</string>
+
+    <string name="home_title">Home</string>
+    <string name="home_signed_in_as">Signed in as</string>
+    <string name="home_sign_out">Sign out</string>
+    <string name="home_restore_active_caption">This device holds a restore credential. Reinstall on a new device and you\'ll be signed in automatically, with zero taps.</string>
+</resources>

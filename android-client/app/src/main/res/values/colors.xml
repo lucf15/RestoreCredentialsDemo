@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Fallback for API < 31, where android:color/system_background_* doesn't exist yet. Matches
+         AppColorTokens.BackgroundLight in the design system. -->
+    <color name="splash_background">#FFF0F2F5</color>
+</resources>

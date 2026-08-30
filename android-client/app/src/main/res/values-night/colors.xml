@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Matches AppColorTokens.BackgroundDark in the design system. -->
+    <color name="splash_background">#FF0D1117</color>
+</resources>
