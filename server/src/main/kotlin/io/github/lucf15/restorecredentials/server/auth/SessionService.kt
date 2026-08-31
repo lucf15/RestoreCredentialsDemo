@@ -23,10 +23,14 @@ class SessionService(
     }
 
     fun refresh(refreshToken: String): TokenPair? {
-        val record = refreshTokens.find(refreshToken) ?: return null
-        refreshTokens.delete(refreshToken)
+        val record = refreshTokens.findAndDelete(refreshToken) ?: return null
         if (record.expiresAt.isBefore(Instant.now())) return null
         return issueTokens(record.userId)
+    }
+
+    /** Revokes the supplied refresh token (this device's session). Idempotent. */
+    fun logout(refreshToken: String) {
+        refreshTokens.delete(refreshToken)
     }
 
     private fun newOpaqueToken(): String {

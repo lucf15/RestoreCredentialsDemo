@@ -1,8 +1,10 @@
 # Restore Credentials Demo
 
-A working, end-to-end sample of Android's [Restore Credentials](https://developer.android.com/identity/sign-in/restore-credentials) API: a Kotlin/Compose Android client and a Kotlin/Ktor backend, demonstrating zero-tap sign-in after a user reinstalls your app on a new device.
+An end-to-end sample of Android's [Restore Credentials](https://developer.android.com/identity/sign-in/restore-credentials) API: a Kotlin/Compose client and a Kotlin/Ktor backend that together sign a user in with zero taps after they reinstall the app on a new device.
 
-Restore Credentials will be required by Google Play for apps with sign-in, starting April 2027 ([announcement](https://android-developers.googleblog.com/2026/08/app-quality-memory-optimization-secure-onboarding.html)). This repo is a minimal, real implementation of both sides of that contract — not a mockup. Every claim in these docs was checked against a real device: signing up creates a real credential server-side, and restoring on a second device really lands the user on the signed-in screen with zero taps.
+Google Play will require Restore Credentials for apps with sign-in starting April 2027 ([announcement](https://android-developers.googleblog.com/2026/08/app-quality-memory-optimization-secure-onboarding.html)).
+
+📝 **Full write-up:** [Android's Restore Credentials API, Explained From Zero](https://medium.com/@lucf15/androids-restore-credentials-api-explained-from-zero-549fbbee35ae?sharedUserId=lucf15).
 
 <p align="center">
   <img src="docs/screenshots/signin.png" alt="Sign-in screen" width="280" />
@@ -13,59 +15,60 @@ Restore Credentials will be required by Google Play for apps with sign-in, start
 ## Repo layout
 
 ```
-server/            Ktor backend - WebAuthn relying party + session issuance. See server/README.md
-android-client/    Android app - Compose UI, Credential Manager integration. See android-client/README.md
-TESTING.md         How to exercise the whole flow yourself, including the restore ceremony
+server/            Ktor backend: WebAuthn relying party + session issuance. See server/README.md
+android-client/    Android app: Compose UI, Credential Manager integration. See android-client/README.md
+TESTING.md         How to exercise the whole flow, including the restore ceremony
 ```
 
-## The mental model
+## How it works
 
-Restore Credentials is **WebAuthn/FIDO2 under the hood** — the same protocol passkeys use. If you've never touched WebAuthn: it's a challenge/response scheme where a device holds a private key and a server holds the matching public key, and "signing in" means proving possession of the private key without ever sending it anywhere. `CreateRestoreCredentialRequest` and `RestoreCredential` (the Android APIs this repo uses) carry standard `PublicKeyCredentialCreationOptionsJSON` / `AuthenticationResponseJSON` payloads — the exact same JSON shapes a browser would exchange for a passkey. The only restore-specific choices are:
+Restore Credentials is WebAuthn/FIDO2, the same protocol as passkeys. A device holds a private key, the server holds the matching public key, and signing in means proving possession of the private key without sending it anywhere. `CreateRestoreCredentialRequest` and `RestoreCredential` carry the standard `PublicKeyCredentialCreationOptionsJSON` / `AuthenticationResponseJSON` payloads a browser would use for a passkey.
 
-- Registration requires a **resident (discoverable) key**, so the credential can be found on a brand-new device before the app knows who the user is.
-- Authentication is **usernameless** — there's no signed-in user yet on a fresh install, so the client never sends one; the device just presents whatever resident key it's holding for this app.
-- The credential is stored **separately from ordinary passkeys** on-device, hidden from any passkey-management UI, one per app per device.
+Three things are specific to restore:
+
+- Registration requires a **resident (discoverable) key**, so the credential can be found on a new device before the app knows who the user is.
+- Authentication is **usernameless**: on a fresh install there is no signed-in user, so the client sends none and the device presents whatever resident key it holds for this app.
+- The credential is stored **separately from ordinary passkeys**, one per app per device, hidden from passkey-management UI.
 
 ### The flow
 
-1. User signs in (or is already signed in) → server issues a session (a short-lived JWT access token plus an opaque, rotating refresh token, in this demo).
-2. The app silently asks the server for WebAuthn registration options, calls `CredentialManager.createCredential()` with a `CreateRestoreCredentialRequest`, and sends the result back to the server for verification. No UI, no user interaction — this happens right after sign-in.
-3. Later, on a new device (or after the app is reinstalled from a backup), the app calls `CredentialManager.getCredential()` with a `GetRestoreCredentialOption` — no username. If a restore credential exists, it comes back with zero taps; the app sends it to the server, gets a fresh session, and the user is signed in before they've touched anything.
-4. If nothing comes back (a `NoCredentialException` under the hood), the app falls through to a normal sign-in screen.
+1. The user signs in and the server issues a session (here: a 15-minute JWT access token plus a 30-day rotating refresh token).
+2. Right after sign-in, with no UI, the app requests WebAuthn registration options, calls `CredentialManager.createCredential()` with a `CreateRestoreCredentialRequest`, and sends the result back for verification.
+3. On a new device or after a reinstall, the app calls `CredentialManager.getCredential()` with a `GetRestoreCredentialOption` and no username. If a restore credential exists it comes back with zero taps; the app exchanges it for a fresh session.
+4. If nothing comes back (`NoCredentialException`), the app shows the normal sign-in screen.
 
-Google's [implementation guide](https://developer.android.com/identity/sign-in/restore-credentials-implementation) recommends fetching the restore credential in two scenarios, and this repo implements both:
+[Google's guide](https://developer.android.com/identity/sign-in/restore-credentials-implementation) recommends triggering step 3 from two places, both implemented here:
 
-- **A background hook**, `BackupAgent.onRestoreFinished()` — called right after your app's data has been restored, before the user has even opened the app. This is what makes the "zero taps" claim literal: notifications and sync can resume before the icon is ever tapped.
-- **A plain foreground check on first launch**, covering the case where the background hook doesn't fire — dropped network, `allowBackup=false`, or (as this repo found out the hard way — see `android-client/README.md`) a process-lifecycle quirk in how `BackupAgent` gets spun up.
+- **`BackupAgent.onRestoreFinished()`**, a background hook the system calls after app data is restored, before the app is opened.
+- **A foreground check on first launch**, for when the hook does not fire: dropped network, `allowBackup=false`, or the process-lifecycle case described in `android-client/README.md`.
 
-## A domain you control is not optional
+## You need a domain you control
 
-Android's Credential Manager binds every restore credential to a real HTTPS domain via [Digital Asset Links](https://developers.google.com/digital-asset-links/v1/getting-started) — there's no `localhost` exemption like browser WebAuthn has. Before any of this works you need:
+Credential Manager binds every restore credential to a real HTTPS domain via [Digital Asset Links](https://developers.google.com/digital-asset-links/v1/getting-started). There is no `localhost` exemption. You need:
 
 1. A domain you can publish a static file to.
-2. `.well-known/assetlinks.json` at that domain, declaring your app's package name and signing-cert SHA-256 fingerprint. See `assetlinks.json` in this repo for the exact shape, and `server/README.md` for how to derive the fingerprint.
-3. `RP_ID` / `RP_ORIGIN` environment variables pointed at that domain when starting the server (see `server/README.md`).
+2. `.well-known/assetlinks.json` at that domain, declaring the app's package name and signing-cert SHA-256 fingerprint. See `assetlinks.json` in this repo for the shape and `server/README.md` for how to get the fingerprint.
+3. `RP_ID` / `RP_ORIGIN` pointed at that domain when starting the server.
 
-Your actual API traffic does **not** need to be public — only the static `assetlinks.json` file does. The app can keep talking to a server on `localhost` via `adb reverse tcp:8080 tcp:8080` (works over USB on a physical device too); Android fetches `assetlinks.json` straight from Google's own infrastructure, independent of where your API lives.
+The API traffic itself stays local: the app reaches the server over `adb reverse tcp:8080 tcp:8080` (USB works too), and Android fetches `assetlinks.json` from Google's own infrastructure regardless of where the API runs.
 
 ## Quick start
 
 ```bash
-# 1. Server (see server/README.md for the env vars and why they're required)
+# Server
 cd server
 RP_ID=<your-domain> RP_ORIGIN=https://<your-domain> ANDROID_ORIGINS=android:apk-key-hash:<your-cert-hash> ./gradlew run
 
-# 2. App (see android-client/README.md for the architecture)
+# App
 cd android-client
 ./gradlew :app:assembleDebug
 adb install -r -t app/build/outputs/apk/debug/app-debug.apk
 adb reverse tcp:8080 tcp:8080
 ```
 
-See `TESTING.md` for the full walkthrough, including how to actually exercise the restore ceremony (not just the sign-in half).
+See `TESTING.md` for the full walkthrough, including the restore ceremony.
 
-## What's a deliberate demo simplification
+## Demo simplifications
 
-- **In-memory storage everywhere** (server users/credentials/tokens, nothing persisted to disk). Swap for a real database before shipping anything.
-- **The sign-in screen takes a password, but the server never checks it** — any username/password signs you in, creating the account on first use. The point of this repo is the restore-credential layer, which is designed to sit *underneath* whatever primary auth you already have; plugging in real password verification wouldn't change anything about the restore-credential code above it.
-- **JWT access token + opaque rotating refresh token**, chosen over a plain server-side session for demo clarity of how the two compose. Either is a legitimate choice for a real deployment; see `server/README.md` for the tradeoffs.
+- **All state is in-memory** (`server/.../data/InMemory*Repository.kt`). Restarting the server clears every user, credential, and token.
+- **`/auth/login` does not check the password.** Any username/password signs in and creates the account on first use. The password field is only there so the sign-in screen is realistic.

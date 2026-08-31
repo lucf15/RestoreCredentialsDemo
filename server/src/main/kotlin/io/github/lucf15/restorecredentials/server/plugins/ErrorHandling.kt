@@ -4,11 +4,16 @@ import io.ktor.http.HttpStatusCode
 import io.ktor.server.application.Application
 import io.ktor.server.application.install
 import io.ktor.server.application.log
+import io.ktor.server.plugins.BadRequestException
 import io.ktor.server.plugins.statuspages.StatusPages
 import io.ktor.server.response.respond
 
 fun Application.configureErrorHandling() {
     install(StatusPages) {
+        exception<BadRequestException> { call, cause ->
+            call.application.log.debug("Malformed request", cause)
+            call.respond(HttpStatusCode.BadRequest, "Malformed or missing request body")
+        }
         exception<Throwable> { call, cause ->
             call.application.log.error("Unhandled error", cause)
             call.respond(HttpStatusCode.InternalServerError, "Internal error")

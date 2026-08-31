@@ -32,4 +32,11 @@ class AuthApiClient(private val httpClient: HttpClient) : AuthRepository {
                 .body()
         return TokenPair(response.accessToken, response.refreshToken)
     }
+
+    override suspend fun logout(refreshToken: String) {
+        httpClient.post("/auth/logout") {
+            contentType(ContentType.Application.Json)
+            setBody(LogoutRequestDto(refreshToken))
+        }
+    }
 }

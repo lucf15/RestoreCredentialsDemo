@@ -26,6 +26,7 @@ dependencies {
 
     implementation("com.yubico:webauthn-server-core:2.9.0")
     implementation("com.auth0:java-jwt:4.6.0")
+    implementation("com.github.ben-manes.caffeine:caffeine:3.1.8")
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.11.0")
 
     implementation("ch.qos.logback:logback-classic:1.5.20")

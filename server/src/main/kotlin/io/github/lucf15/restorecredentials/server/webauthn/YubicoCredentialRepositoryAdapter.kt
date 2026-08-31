@@ -16,8 +16,8 @@ class YubicoCredentialRepositoryAdapter(
 
     override fun getCredentialIdsForUsername(username: String): MutableSet<PublicKeyCredentialDescriptor> {
         val user = users.findByUsername(username) ?: return mutableSetOf()
-        val record = restoreCredentials.findByUserId(user.id) ?: return mutableSetOf()
-        return mutableSetOf(PublicKeyCredentialDescriptor.builder().id(record.credentialId.toYubico()).build())
+        return restoreCredentials.findByUserId(user.id)
+            .mapTo(mutableSetOf()) { PublicKeyCredentialDescriptor.builder().id(it.credentialId.toYubico()).build() }
     }
 
     override fun getUserHandleForUsername(username: String): Optional<YubicoByteArray> =

@@ -15,9 +15,8 @@ android {
         versionName = "1.0"
 
         // Requires `adb reverse tcp:8080 tcp:8080` so the device's own localhost:8080 forwards to
-        // the host machine, where `./gradlew run` serves the Ktor server - more reliable across
-        // emulator network modes than the classic 10.0.2.2 alias, and works on a USB-attached
-        // physical device too. Point this at a real HTTPS host to exercise the actual
+        // the host machine, where `./gradlew run` serves the Ktor server. Works on the emulator and
+        // on a USB-attached physical device. Point this at a real HTTPS host to exercise the actual
         // restore-credential ceremony (see server/README).
         buildConfigField("String", "SERVER_BASE_URL", "\"http://127.0.0.1:8080\"")
     }

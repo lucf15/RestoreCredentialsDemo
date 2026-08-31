@@ -5,7 +5,7 @@ import io.github.lucf15.restorecredentials.server.domain.model.RestoreCredential
 interface RestoreCredentialRepository {
     fun save(record: RestoreCredentialRecord)
 
-    fun findByUserId(userId: String): RestoreCredentialRecord?
+    fun findByUserId(userId: String): List<RestoreCredentialRecord>
 
     fun findByCredentialId(credentialId: ByteArray): RestoreCredentialRecord?
 

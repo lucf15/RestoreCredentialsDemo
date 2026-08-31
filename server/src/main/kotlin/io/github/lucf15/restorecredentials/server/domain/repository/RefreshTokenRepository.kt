@@ -9,5 +9,8 @@ interface RefreshTokenRepository {
 
     fun delete(token: String)
 
+    /** Atomically removes [token] and returns its record, or null if already gone. */
+    fun findAndDelete(token: String): RefreshTokenRecord?
+
     fun deleteAllForUser(userId: String)
 }

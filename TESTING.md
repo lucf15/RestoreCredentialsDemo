@@ -1,6 +1,6 @@
-# Testing this yourself
+# Testing
 
-Everywhere below, `$DEV` is a device serial from `adb devices -l` and `$PKG` is `io.github.lucf15.restorecredentials`. If you only have one device/emulator attached, drop `-s $DEV` entirely.
+`$DEV` is a device serial from `adb devices -l`; `$PKG` is `io.github.lucf15.restorecredentials`. Drop `-s $DEV` if only one device is attached.
 
 ## 1. Start the server
 
@@ -9,7 +9,7 @@ cd server
 RP_ID=<your-domain> RP_ORIGIN=https://<your-domain> ANDROID_ORIGINS=android:apk-key-hash:<your-debug-cert-hash> ./gradlew run
 ```
 
-See `server/README.md` for what each variable means and how to get the cert hash. Leave this running — you'll want to watch its log output through every step below.
+See `server/README.md` for the variables and the cert hash. Leave it running and watch its log.
 
 ## 2. Build and install the app
 
@@ -20,56 +20,50 @@ adb -s $DEV install -r -t app/build/outputs/apk/debug/app-debug.apk
 adb -s $DEV reverse tcp:8080 tcp:8080
 ```
 
-## 3. Sanity-check the server directly
+## 3. Check the server directly
 
 ```bash
 curl -s -X POST http://localhost:8080/auth/login -H "Content-Type: application/json" -d '{"username":"test","password":"anything"}'
 ```
 
-You should get back a JSON body with an access token and refresh token. Sign-in always succeeds and creates the account on first use — see `server/README.md` for why the password isn't actually checked.
+Returns an access token and a refresh token. Sign-in always succeeds and creates the account on first use.
 
-## 4. Test the create ceremony
+## 4. Create ceremony
 
-Sign in in the app UI, then check the server log for, in order:
-`POST /auth/login` (200) → `POST /restore/register/options` (200) → `POST /restore/register/verify` (**204**).
+Sign in in the app, then check the server log for, in order:
+`POST /auth/login` (200) → `POST /restore/register/options` (200) → `POST /restore/register/verify` (204).
 
-A 204 there means a real WebAuthn resident key was created and verified server-side — not just that the sign-in screen closed.
+The 204 means a resident key was created and verified server-side.
 
-## 5. Test the restore ceremony
+## 5. Restore ceremony
 
-This is the part that actually needs explaining, because "just reinstall the app" doesn't exercise the real code path.
+"Just reinstall the app" does not exercise this. Android has three backup transports and only one carries a restore credential:
 
-### Why the obvious things don't work
-
-Android has three separate backup transports, and only one of them actually carries the data a restore credential lives in:
-
-- **Local transport** (`adb shell bmgr backupnow`/`restore` with no transport selected) only carries whatever your app explicitly declares for backup — files, `BackupAgent` key-value data. It does **not** carry restore credentials; they live in Google Play Services' own credential store, entirely separate from your app's declared backup content. If a local-transport restore lands you on the signed-in screen, you're seeing a locally-restored session file, not a real restored credential — which is exactly why this app excludes its session file from backup (`res/xml/backup_rules.xml`, `res/xml/data_extraction_rules.xml`). A correct local-transport restore should land you back on the sign-in screen.
-- **D2D (device-to-device) transport**, driven directly via `bmgr restore`, refuses outright: `[D2dTransport] Can't restore from D2d Transport.` — a deliberate guard in Play Services' own code. It only works through the real Setup Wizard device-to-device migration flow, which isn't independently scriptable.
-- **Cloud transport** is the one that actually carries the credential — but only with a real signed-in Google account, "Backup by Google One" explicitly turned on (Settings → Backup), and a screen lock set for the end-to-end encryption. Even then, the first backup after opting in fails with "Encryption key has not synced" while Google's servers catch up — a real async delay, sometimes several minutes.
-
-That last path is real but slow and account-dependent, which makes it painful to iterate on. There's a much faster local option:
+- **Local transport** (`adb shell bmgr backupnow` / `restore`) carries only what your app declares for backup. Restore credentials live in Google Play Services' own store, not in that stream. If a local restore lands on the signed-in screen, that is a restored session file, not a restored credential, which is why this app excludes its session file from backup (`res/xml/backup_rules.xml`, `res/xml/data_extraction_rules.xml`). A correct local restore lands on the sign-in screen.
+- **D2D transport** via `bmgr restore` refuses: `[D2dTransport] Can't restore from D2d Transport.` It only runs through the real Setup Wizard migration.
+- **Cloud transport** carries the credential, but needs a signed-in Google account, "Backup by Google One" turned on, and a screen lock for end-to-end encryption. The first backup after opting in fails with "Encryption key has not synced" until Google's servers catch up.
 
 ### Android Studio's Backup/Restore App Data
 
-This is the [officially documented way](https://developer.android.com/identity/sign-in/test-restore-credentials) to test this. It needs **Android Studio Otter (2025.2.1) or newer**, and the app built `debuggable` (the default for a debug build). Per Google's own docs, this isn't just a shortcut around real backup transports — Studio's restore flow **"simulates the setup wizard flow"**, the same privileged path a real device-to-device migration goes through during Android's actual setup, which is more than any sequence of `bmgr`/`adb` commands run from a terminal can trigger on their own.
+The [documented way](https://developer.android.com/identity/sign-in/test-restore-credentials) to test this. Needs Android Studio Otter (2025.2.1) or newer and a debuggable build. Google's docs note this flow "simulates the setup wizard flow", the same privileged path a real device-to-device migration uses.
 
-The Running Devices toolbar has **Backup App Data** and **Restore App Data** actions (`Run` menu, or the toolbar icon). Pick **Device to Device** as the backup type, run a backup on the device that's signed in, then run a restore on a different (or freshly wiped) device using the resulting `.backup` file. If `android:allowBackup` is `false` in your manifest (it's `true` in this one), Google's docs note that only Device to Device restores work this way — Cloud restores need it `true`.
+In the Running Devices toolbar: **Backup App Data** and **Restore App Data** (`Run` menu or toolbar icon). Pick **Device to Device**, back up on the signed-in device, then restore on another device from the resulting `.backup` file. With `android:allowBackup="false"` only Device to Device restores work this way; it is `true` here, so Cloud restores work too.
 
-Watch the server log for `POST /restore/authenticate/verify` (200) — that's confirmation the credential round-tripped for real, independent of whatever the app UI happens to show.
+Watch the server log for `POST /restore/authenticate/verify` (200): the credential round-tripped.
 
-## Watching both sides live
+## Watching both sides
 
 ```bash
-# Server: the restore-credential lifecycle
+# Server
 tail -f /tmp/server.log | grep --line-buffered "restore\|login"
 
-# Client: BackupAgent's background restore attempt
+# Client
 adb -s $DEV logcat -c && adb -s $DEV logcat | grep "RestoreCredentialBackupAgent"
 ```
 
-If the background hook fires (`onRestoreFinished: fired` in logcat) but nothing reaches the server, the app crashed before it could make the call — check logcat for a stack trace rather than assuming the credential itself is missing.
+If `onRestoreFinished: fired` appears in logcat but nothing reaches the server, the app crashed before the call; check logcat for a stack trace.
 
-## Everything else that bit us, briefly
+## Other notes
 
-- **`adb reverse` doesn't survive Android Studio re-attaching to a device.** Re-run it after Studio grabs the device, or requests just time out with no useful error.
-- **`android:fullBackupOnly="true"` is required** on the `<application>` tag once you declare a custom `android:backupAgent` — otherwise Android Studio's backup tooling fails with "App did not provide any backup data," because it tries the (empty, by design) key-value `onBackup()` path instead of full-data backup.
+- **`adb reverse` does not survive Android Studio re-attaching a device.** Re-run it, or requests time out.
+- **`android:fullBackupOnly="true"` is required** on `<application>` once you declare a custom `android:backupAgent`, or Android Studio's backup tooling fails with "App did not provide any backup data".

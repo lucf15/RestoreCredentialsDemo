@@ -17,6 +17,8 @@ class InMemoryRefreshTokenRepository : RefreshTokenRepository {
         byToken.remove(token)
     }
 
+    override fun findAndDelete(token: String): RefreshTokenRecord? = byToken.remove(token)
+
     override fun deleteAllForUser(userId: String) {
         byToken.values.filter { it.userId == userId }.forEach { byToken.remove(it.token) }
     }

@@ -31,6 +31,11 @@ fun Route.authRoutes(users: UserRepository, sessions: SessionService) {
         call.respond(RefreshResponse(tokens.accessToken, tokens.refreshToken))
     }
 
+    post("/auth/logout") {
+        sessions.logout(call.receive<LogoutRequest>().refreshToken)
+        call.respond(HttpStatusCode.NoContent)
+    }
+
     authenticate("auth-jwt") {
         get("/auth/me") {
             val userId = call.principal<JWTPrincipal>()!!.payload.subject

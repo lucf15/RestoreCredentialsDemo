@@ -8,6 +8,8 @@ import kotlinx.serialization.Serializable
 
 @Serializable data class RefreshRequestDto(val refreshToken: String)
 
+@Serializable data class LogoutRequestDto(val refreshToken: String)
+
 @Serializable data class RefreshResponseDto(val accessToken: String, val refreshToken: String)
 
 @Serializable data class RestoreRegistrationOptionsResponseDto(val requestJson: String)

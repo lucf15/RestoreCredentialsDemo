@@ -10,6 +10,7 @@ import androidx.credentials.GetCredentialRequest
 import androidx.credentials.GetRestoreCredentialOption
 import androidx.credentials.RestoreCredential
 import androidx.credentials.exceptions.GetCredentialException
+import androidx.credentials.exceptions.NoCredentialException
 import androidx.credentials.exceptions.restorecredential.E2eeUnavailableException
 import io.github.lucf15.restorecredentials.domain.repository.RestoreCredentialGateway
 import io.github.lucf15.restorecredentials.domain.repository.RestoreSignInOutcome
@@ -36,7 +37,12 @@ class AndroidRestoreCredentialGateway(context: Context) : RestoreCredentialGatew
         val response =
             try {
                 credentialManager.getCredential(appContext, request)
+            } catch (e: NoCredentialException) {
+                Log.d("RestoreCredentialGateway", "No restore credential available", e)
+                return RestoreSignInOutcome.NotAvailable
             } catch (e: GetCredentialException) {
+                // Usually a misconfiguration (assetlinks, RP ID, E2EE state) rather than "no credential".
+                Log.e("RestoreCredentialGateway", "getCredential failed (type=${e.type})", e)
                 return RestoreSignInOutcome.NotAvailable
             }
         return RestoreSignInOutcome.Available((response.credential as RestoreCredential).authenticationResponseJson)

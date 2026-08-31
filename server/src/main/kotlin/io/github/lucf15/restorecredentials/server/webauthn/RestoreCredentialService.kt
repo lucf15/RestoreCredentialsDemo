@@ -1,5 +1,7 @@
 package io.github.lucf15.restorecredentials.server.webauthn
 
+import com.github.benmanes.caffeine.cache.Cache
+import com.github.benmanes.caffeine.cache.Caffeine
 import com.yubico.webauthn.AssertionRequest
 import com.yubico.webauthn.FinishAssertionOptions
 import com.yubico.webauthn.FinishRegistrationOptions
@@ -17,8 +19,8 @@ import io.github.lucf15.restorecredentials.server.domain.model.RestoreCredential
 import io.github.lucf15.restorecredentials.server.domain.model.User
 import io.github.lucf15.restorecredentials.server.domain.repository.RestoreCredentialRepository
 import io.github.lucf15.restorecredentials.server.domain.repository.UserRepository
+import java.time.Duration
 import java.util.UUID
-import java.util.concurrent.ConcurrentHashMap
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonObject
 import com.yubico.webauthn.data.ByteArray as YubicoByteArray
@@ -37,10 +39,16 @@ class RestoreCredentialService(
             .identity(RelyingPartyIdentity.builder().id(rpId).name(rpName).build())
             .credentialRepository(YubicoCredentialRepositoryAdapter(restoreCredentials, users))
             .origins(origins)
+            // Restore credentials always report a signature count of 0; don't validate it.
+            .validateSignatureCounter(false)
             .build()
 
-    private val pendingRegistrations = ConcurrentHashMap<String, PublicKeyCredentialCreationOptions>()
-    private val pendingAssertions = ConcurrentHashMap<String, AssertionRequest>()
+    // In-flight ceremony state; entries expire so abandoned flows (and floods on the unauthenticated
+    // /restore/authenticate/options) can't grow unbounded.
+    private val pendingRegistrations: Cache<String, PublicKeyCredentialCreationOptions> =
+        Caffeine.newBuilder().maximumSize(MAX_PENDING).expireAfterWrite(PENDING_TTL).build()
+    private val pendingAssertions: Cache<String, AssertionRequest> =
+        Caffeine.newBuilder().maximumSize(MAX_PENDING).expireAfterWrite(PENDING_TTL).build()
 
     fun startRegistration(user: User): String {
         val options =
@@ -61,12 +69,14 @@ class RestoreCredentialService(
                     )
                     .build()
             )
-        pendingRegistrations[user.id] = options
+        pendingRegistrations.put(user.id, options)
         return unwrapPublicKey(options.toCredentialsCreateJson())
     }
 
     fun finishRegistration(user: User, registrationResponseJson: String) {
-        val options = pendingRegistrations.remove(user.id) ?: error("No pending restore-credential registration for ${user.username}")
+        val options =
+            pendingRegistrations.asMap().remove(user.id)
+                ?: error("No pending restore-credential registration for ${user.username}")
         val pkc = PublicKeyCredential.parseRegistrationResponseJson(registrationResponseJson)
         val result = relyingParty.finishRegistration(FinishRegistrationOptions.builder().request(options).response(pkc).build())
 
@@ -84,17 +94,22 @@ class RestoreCredentialService(
     fun startAuthentication(): Pair<String, String> {
         val request = relyingParty.startAssertion(StartAssertionOptions.builder().userVerification(UserVerificationRequirement.DISCOURAGED).build())
         val requestId = UUID.randomUUID().toString()
-        pendingAssertions[requestId] = request
+        pendingAssertions.put(requestId, request)
         return requestId to unwrapPublicKey(request.toCredentialsGetJson())
     }
 
     fun finishAuthentication(requestId: String, authenticationResponseJson: String): User {
-        val request = pendingAssertions.remove(requestId) ?: error("No pending restore-credential assertion for $requestId")
+        val request =
+            pendingAssertions.asMap().remove(requestId) ?: error("No pending restore-credential assertion for $requestId")
         val pkc = PublicKeyCredential.parseAssertionResponseJson(authenticationResponseJson)
         val result = relyingParty.finishAssertion(FinishAssertionOptions.builder().request(request).response(pkc).build())
 
-        check(result.isSuccess) { "Restore-credential assertion failed" }
         restoreCredentials.updateSignatureCount(result.credential.credentialId.bytes, result.signatureCount)
         return users.findByUsername(result.username) ?: error("No user found for verified assertion")
+    }
+
+    private companion object {
+        const val MAX_PENDING = 10_000L
+        val PENDING_TTL: Duration = Duration.ofMinutes(5)
     }
 }
